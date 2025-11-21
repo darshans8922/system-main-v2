@@ -1,0 +1,73 @@
+"""
+Main Flask application factory.
+"""
+from pathlib import Path
+
+from flask import Flask
+from flask_socketio import SocketIO
+
+from app.config import Config
+from app.database import init_db
+from app.services import user_service
+
+socketio = SocketIO(cors_allowed_origins="*", async_mode='threading')
+
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATE_DIR = BASE_DIR.parent / "templates"
+
+
+def create_app(config_class=Config):
+    """Create and configure the Flask application."""
+    app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
+    app.config.from_object(config_class)
+    
+    # Initialize SocketIO
+    socketio.init_app(app)
+    
+    # Register blueprints
+    from app.routes.main import main_bp
+    from app.routes.api import api_bp
+    from app.routes.internal import internal_bp
+    from app.routes.websocket_routes import ws_bp
+    from app.routes.sse_routes import sse_bp
+    
+    app.register_blueprint(main_bp)
+    app.register_blueprint(api_bp)
+    app.register_blueprint(internal_bp)
+    app.register_blueprint(ws_bp)
+    app.register_blueprint(sse_bp)
+
+    # Initialize persistence + service layer
+    with app.app_context():
+        init_db()
+        user_service.start()
+    
+    # Start background cleanup thread for SSE connections
+    _start_sse_cleanup_thread()
+    
+    return app
+
+
+def _start_sse_cleanup_thread():
+    """Start background thread to clean up stale SSE connections."""
+    import threading
+    import time
+    import logging
+    
+    def cleanup_loop():
+        """Background loop to clean up stale SSE connections."""
+        from app.sse_manager import sse_manager
+        
+        while True:
+            try:
+                time.sleep(60)  # Run every minute
+                cleaned = sse_manager.cleanup_stale_connections(timeout_seconds=120)
+                if cleaned > 0:
+                    logging.info(f"Cleaned up {cleaned} stale SSE connections")
+            except Exception as e:
+                logging.error(f"Error in SSE cleanup loop: {e}")
+    
+    cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True, name="SSE-Cleanup")
+    cleanup_thread.start()
+
+

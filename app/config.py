@@ -1,0 +1,63 @@
+"""
+Application configuration.
+"""
+import os
+
+
+class Config:
+    """Base configuration."""
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
+    DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    
+    # WebSocket configuration
+    SOCKETIO_ASYNC_MODE = 'threading'
+    SOCKETIO_CORS_ALLOWED_ORIGINS = '*'
+    
+    # Code ingestion settings
+    MAX_CODE_LENGTH = 1000
+    CODE_QUEUE_SIZE = 1000
+    
+    # SSE configuration
+    WS_SECRET = os.environ.get('WS_SECRET') or os.environ.get('SECRET_KEY') or 'dev-ws-secret-change-in-production'
+    
+    # Allowed origins for embed-stream (client will provide full list)
+    ALLOWED_ORIGINS = [
+        "https://kciade.online",
+        "https://www.kciade.online",
+        "http://kciade.online",
+        "http://www.kciade.online",
+        "https://stake.com",
+        "https://stake.ac",
+        "https://stake.games",
+        "https://stake.bet",
+        "https://stake.pet",
+        "https://stake.mba",
+        "https://stake.jp",
+        "https://stake.bz",
+        "https://stake.ceo",
+        "https://stake.krd",
+        "https://staketr.com",
+        "https://stake1001.com",
+        "https://stake1002.com",
+        "https://stake1003.com",
+        "https://stake1021.com",
+        "https://stake1022.com",
+        "https://stake.us",
+        "https://stake.br"
+    ]
+    
+    # Add Render host if available
+    RENDER_HOST = os.environ.get('RENDER_EXTERNAL_URL', '')
+    if RENDER_HOST:
+        ALLOWED_ORIGINS.append(RENDER_HOST)
+    
+    # Development/localhost support - always allow localhost for testing
+    ALLOWED_ORIGINS.extend([
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://127.0.0.1:3000"
+    ])
+
+
+
