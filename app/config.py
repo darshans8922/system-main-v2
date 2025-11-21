@@ -10,7 +10,8 @@ class Config:
     DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     
     # WebSocket configuration
-    SOCKETIO_ASYNC_MODE = 'threading'
+    # Use eventlet for Gunicorn eventlet workers, threading for development
+    SOCKETIO_ASYNC_MODE = os.environ.get('SOCKETIO_ASYNC_MODE', 'eventlet')
     SOCKETIO_CORS_ALLOWED_ORIGINS = '*'
     
     # Code ingestion settings

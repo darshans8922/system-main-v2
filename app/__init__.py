@@ -10,7 +10,11 @@ from app.config import Config
 from app.database import init_db
 from app.services import user_service
 
-socketio = SocketIO(cors_allowed_origins="*", async_mode='threading')
+# Use eventlet async mode when running with Gunicorn eventlet workers
+# This is detected automatically, but we can be explicit
+import os
+async_mode = os.environ.get('SOCKETIO_ASYNC_MODE', 'eventlet')
+socketio = SocketIO(cors_allowed_origins="*", async_mode=async_mode)
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = BASE_DIR.parent / "templates"
