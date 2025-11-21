@@ -39,8 +39,14 @@ def create_app(config_class=Config):
 
     # Initialize persistence + service layer
     with app.app_context():
-        init_db()
-        user_service.start()
+        try:
+            init_db()
+            user_service.start()
+        except Exception as e:
+            import logging
+            logging.error(f"Error during database/service initialization: {e}", exc_info=True)
+            # Don't crash the app - let it start and handle errors at request time
+            # This allows the health endpoint to work even if DB is temporarily unavailable
     
     # Start background cleanup thread for SSE connections
     _start_sse_cleanup_thread()

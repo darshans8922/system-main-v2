@@ -15,6 +15,11 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
+    import logging
+    logging.error(
+        "DATABASE_URL environment variable is required. "
+        "Set it to your production database connection string."
+    )
     raise RuntimeError(
         "DATABASE_URL environment variable is required. "
         "Set it to your production database connection string."
@@ -48,9 +53,14 @@ def init_db() -> None:
     """
     Import models and create tables. Should be invoked once during startup.
     """
-    from app import models  # noqa: F401  (side-effect import)
-
-    Base.metadata.create_all(bind=engine)
+    import logging
+    try:
+        from app import models  # noqa: F401  (side-effect import)
+        Base.metadata.create_all(bind=engine)
+        logging.info("Database initialized successfully")
+    except Exception as e:
+        logging.error(f"Error initializing database: {e}", exc_info=True)
+        raise
 
 
 @contextmanager
