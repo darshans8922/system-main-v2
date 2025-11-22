@@ -180,22 +180,7 @@ GET /api/users/bharat/verify
 
 ---
 
-#### 5. `GET /sse-stats`
-**Purpose:** SSE connection statistics (monitoring)
-
-**Response (200):**
-```json
-{
-  "active_connections": 150,
-  "users_with_connections": 150,
-  "total_queued_messages": 23,
-  "total_health_tracked": 150
-}
-```
-
----
-
-#### 6. `GET /relay?url=...`
+#### 5. `GET /relay?url=...`
 **Purpose:** HTTP proxy to bypass CSP/CORS restrictions
 
 **Request:**
@@ -732,7 +717,6 @@ ALLOWED_ORIGINS = [
 - [x] Automatic connection cleanup (stale connections after 120s)
 - [x] Connection limits (500 max)
 - [x] Error logging
-- [x] Monitoring endpoint (`/sse-stats`)
 - [ ] Set `WS_SECRET` environment variable
 - [ ] Configure `ALLOWED_ORIGINS`
 - [ ] Set up monitoring alerts
@@ -742,22 +726,7 @@ ALLOWED_ORIGINS = [
 ### Monitoring
 
 **Check SSE Stats:**
-```bash
-curl http://localhost:5000/sse-stats
-```
-
-**Expected Response:**
-```json
-{
-  "active_connections": 150,
-  "users_with_connections": 150,
-  "total_queued_messages": 23,
-  "total_health_tracked": 150
-}
-```
-
 **Set Up Alerts:**
-- Connection count > 450 (80% of limit)
 - Memory usage > 1.5GB
 - Cleanup removing > 50 connections/hour
 
@@ -884,7 +853,6 @@ window.addEventListener('message', (event) => {
 - **Socket.IO Test:** `http://localhost:5000/test`
 - **SSE Test:** `http://localhost:5000/sse-test`
 - **Health Check:** `http://localhost:5000/health`
-- **SSE Stats:** `http://localhost:5000/sse-stats`
 
 ---
 
@@ -894,8 +862,7 @@ For issues or questions:
 1. Check server logs
 2. Check browser console (F12)
 3. Verify user exists: `GET /api/users/<username>/verify`
-4. Check connection stats: `GET /sse-stats`
-5. Review this documentation
+4. Review this documentation
 
 ---
 

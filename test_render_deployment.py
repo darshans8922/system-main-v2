@@ -99,25 +99,9 @@ def test_send_code():
             print(f"   Response: {e.response.text}")
         return False
 
-def test_sse_stats():
-    """Test SSE stats endpoint."""
-    print_step(4, "SSE Stats")
-    try:
-        response = requests.get(f"{BASE_URL}/sse-stats", timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        print(f"✅ Status: {response.status_code}")
-        print(f"✅ Response: {json.dumps(data, indent=2)}")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"   Response: {e.response.text}")
-        return False
-
 def test_sse_test_page():
     """Test if SSE test page is accessible."""
-    print_step(5, "SSE Test Page")
+    print_step(4, "SSE Test Page")
     try:
         response = requests.get(f"{BASE_URL}/sse-test", timeout=10)
         response.raise_for_status()
@@ -143,7 +127,6 @@ def main():
     results.append(("Health Check", test_health()))
     results.append(("User Verify", test_verify_user()))
     results.append(("Send Code", test_send_code()))
-    results.append(("SSE Stats", test_sse_stats()))
     results.append(("SSE Test Page", test_sse_test_page()))
     
     # Summary

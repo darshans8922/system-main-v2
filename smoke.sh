@@ -17,7 +17,4 @@ curl -sf -X POST "$BASE_URL/api/ingest" \
   -d "{\"username\":\"$TEST_USER\",\"code\":\"$TEST_CODE\",\"source\":\"smoke\"}" \
   | jq .
 
-echo "4) SSE stats (optional)..."
-curl -sf "$BASE_URL/sse-stats" | jq .
-
 echo "Smoke test complete."

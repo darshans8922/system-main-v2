@@ -56,7 +56,6 @@ Includes:
 
 - `POST /api/ingest` - Send codes via HTTP
 - `GET /api/users/<username>/verify` - Verify username
-- `GET /sse-stats` - Monitor SSE connections
 - `GET /health` - Health check
 - WebSocket: `/events`, `/internal/newcodes`, `/ws/ingest`, `/embed`
 - SSE: `/embed-stream`, `/events` (SSE stream)

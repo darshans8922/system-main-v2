@@ -97,26 +97,6 @@ curl http://localhost:5000/health
 
 ---
 
-### 4. SSE Stats (Monitoring)
-**Endpoint:** `GET /sse-stats`
-
-**Request:**
-```bash
-curl http://localhost:5000/sse-stats
-```
-
-**Response:**
-```json
-{
-  "total_connections": 5,
-  "active_users": ["bharat", "user2"],
-  "connection_count": 5,
-  "queue_sizes": {"bharat": 0}
-}
-```
-
----
-
 ## WebSocket APIs (Socket.IO)
 
 ### Connection URLs

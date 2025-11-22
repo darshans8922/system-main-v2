@@ -9,7 +9,7 @@ import time
 import random
 import string
 
-SERVER = "http://localhost:5000"
+SERVER = "https://system-main-v2.onrender.com"  # Production server
 USERNAME = "bharat"  # Default test username
 
 
@@ -41,11 +41,35 @@ def print_warning(msg):
 
 
 def create_user(username):
-    """Create a test user in the database."""
-    from app.database import db_session
-    from app.models import User
-    
+    """Create a test user in the production database."""
     try:
+        import os
+        from dotenv import load_dotenv
+        
+        # Load environment variables (DATABASE_URL should be set)
+        load_dotenv()
+        
+        # Check if DATABASE_URL is set
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            print_error("DATABASE_URL environment variable is not set!")
+            print_info("To use production database, set it in one of these ways:")
+            print_info("1. Create a .env file with: DATABASE_URL=postgresql://...")
+            print_info("2. Set environment variable: export DATABASE_URL='postgresql://...' (Linux/Mac)")
+            print_info("3. Set environment variable: set DATABASE_URL=postgresql://... (Windows)")
+            print_info("4. Set environment variable: $env:DATABASE_URL='postgresql://...' (PowerShell)")
+            return False
+        
+        # Show which database we're using (mask password, show host)
+        if '@' in database_url:
+            db_display = database_url.split('@')[1]
+        else:
+            db_display = 'configured database'
+        print_info(f"Using PRODUCTION database: {db_display}")
+        
+        from app.database import db_session
+        from app.models import User
+        
         with db_session() as session:
             # Check if user exists
             existing = session.query(User).filter(User.username == username).first()
@@ -57,10 +81,12 @@ def create_user(username):
             user = User(username=username)
             session.add(user)
             session.commit()
-            print_success(f"User '{username}' created successfully!")
+            print_success(f"User '{username}' created successfully in production database!")
             return True
     except Exception as e:
         print_error(f"Error creating user: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -68,7 +94,9 @@ def test_health():
     """Test health endpoint."""
     print_header("Testing Health Endpoint")
     try:
-        resp = requests.get(f"{SERVER}/health", timeout=10)
+        # Longer timeout for remote servers
+        timeout = 30 if SERVER.startswith('https://') else 10
+        resp = requests.get(f"{SERVER}/health", timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             print_success(f"Health check passed: {data}")
@@ -82,44 +110,47 @@ def test_health():
 
 
 def verify_user(username):
-    """Verify if a user exists."""
+    """Verify if a user exists (checks both HTTP API and database directly)."""
     print_header(f"Verifying User: {username}")
+    
+    # First, check database directly (production database)
     try:
-        resp = requests.get(f"{SERVER}/api/users/{username}/verify", timeout=10)
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        if os.getenv("DATABASE_URL"):
+            from app.database import db_session
+            from app.models import User
+            
+            with db_session() as session:
+                user = session.query(User).filter(User.username == username).first()
+                if user:
+                    print_success(f"✅ User '{username}' exists in PRODUCTION database (ID: {user.id})")
+                else:
+                    print_warning(f"⚠️  User '{username}' NOT found in production database")
+        else:
+            print_warning("⚠️  DATABASE_URL not set, skipping direct database check")
+    except Exception as e:
+        print_warning(f"⚠️  Could not check database directly: {e}")
+    
+    # Also test HTTP API endpoint
+    try:
+        timeout = 30 if SERVER.startswith('https://') else 10
+        resp = requests.get(f"{SERVER}/api/users/{username}/verify", timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
-            print_success(f"User verified: {json.dumps(data, indent=2)}")
+            print_success(f"✅ HTTP API verified: {json.dumps(data, indent=2)}")
             return True
         elif resp.status_code == 404:
-            print_error(f"User '{username}' not found")
+            print_warning(f"⚠️  HTTP API returned 404 (user not found via API)")
+            print_info("Note: User may exist in database but API endpoint may have issues")
             return False
         else:
-            print_error(f"Verification failed: {resp.status_code} - {resp.text}")
+            print_error(f"❌ HTTP API verification failed: {resp.status_code} - {resp.text}")
             return False
     except Exception as e:
-        print_error(f"Error verifying user: {e}")
-        return False
-
-
-def test_sse_stats():
-    """Test SSE stats endpoint."""
-    print_header("Testing SSE Stats")
-    try:
-        resp = requests.get(f"{SERVER}/sse-stats", timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            # Check if there's a timeout error (still returns 200 with error field)
-            if 'error' in data and 'timeout' in data.get('error', '').lower():
-                print_warning(f"SSE Stats returned with timeout (server may be busy): {json.dumps(data, indent=2)}")
-                print_info("This is OK - stats endpoint is working, just took longer than expected")
-            else:
-                print_success(f"SSE Stats: {json.dumps(data, indent=2)}")
-            return True  # Still count as pass since endpoint responded
-        else:
-            print_error(f"SSE stats failed: {resp.status_code}")
-            return False
-    except Exception as e:
-        print_error(f"SSE stats error: {e}")
+        print_error(f"❌ Error verifying user via HTTP API: {e}")
         return False
 
 
@@ -138,11 +169,12 @@ def send_code_post(username, code="TEST-CODE-123", source="test-script"):
             }
         }
         
+        timeout = 30 if SERVER.startswith('https://') else 10
         resp = requests.post(
             f"{SERVER}/api/ingest",
             json=data,
             headers={"Content-Type": "application/json"},
-            timeout=10
+            timeout=timeout
         )
         
         if resp.status_code == 200:
@@ -168,10 +200,11 @@ def send_code_get(username, code="TEST-CODE-456", source="test-script"):
             "type": "default"
         }
         
+        timeout = 30 if SERVER.startswith('https://') else 10
         resp = requests.get(
             f"{SERVER}/api/ingest",
             params=params,
-            timeout=10
+            timeout=timeout
         )
         
         if resp.status_code == 200:
@@ -231,15 +264,20 @@ def test_websocket(username):
             print_error(f"WebSocket error: {data}")
         
         # Connect to /events namespace (where code broadcasts happen)
-        print_info(f"Connecting to {SERVER}/events with username: {username}")
+        # Use wss:// for HTTPS servers
+        ws_url = SERVER.replace('https://', 'wss://').replace('http://', 'ws://')
+        print_info(f"Connecting to {ws_url}/events with username: {username}")
         try:
-            sio.connect(f"{SERVER}/events?username={username}", wait_timeout=15)
+            # SocketIO handles SSL automatically for wss:// URLs
+            sio.connect(f"{ws_url}/events?username={username}", wait_timeout=30)
         except Exception as e:
             print_error(f"Connection failed: {e}")
             return False
         
         # Wait for connection to establish (namespace connection is async)
-        time.sleep(3)
+        # Longer wait for remote servers (may have cold start delays)
+        wait_time = 5 if SERVER.startswith('https://') else 3
+        time.sleep(wait_time)
         
         if not connected:
             print_error("WebSocket connection not established")
@@ -262,7 +300,7 @@ def test_websocket(username):
                     'source': 'websocket-test',
                     'type': 'default'
                 },
-                timeout=10
+                timeout=30 if SERVER.startswith('https://') else 10
             )
             if resp.status_code == 200:
                 print_success(f"Test code sent via API: {test_code}")
@@ -273,7 +311,8 @@ def test_websocket(username):
         
         # Wait for code to be received
         print_info("Waiting for code to be received via WebSocket...")
-        time.sleep(3)
+        wait_time = 5 if SERVER.startswith('https://') else 3
+        time.sleep(wait_time)
         
         # Disconnect
         sio.disconnect()
@@ -304,7 +343,8 @@ def test_sse_embed_stream(username):
         nonce = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
         url = f"{SERVER}/embed-stream?user={username}&nonce={nonce}"
         
-        resp = requests.get(url, timeout=10)
+        timeout = 30 if SERVER.startswith('https://') else 10
+        resp = requests.get(url, timeout=timeout)
         if resp.status_code == 200:
             if 'text/html' in resp.headers.get('Content-Type', ''):
                 print_success(f"Embed stream endpoint accessible (HTML returned)")
@@ -328,18 +368,34 @@ def test_all(username=USERNAME):
     print_info(f"Server: {SERVER}")
     
     # Check if server is responding
+    is_remote = SERVER.startswith('https://') or (SERVER.startswith('http://') and 'localhost' not in SERVER and '127.0.0.1' not in SERVER)
+    
     try:
-        resp = requests.get(f"{SERVER}/health", timeout=2)
+        # Longer timeout for remote servers (Render cold starts can take 30-60s)
+        timeout = 60 if is_remote else 2
+        print_info(f"Checking server health (timeout: {timeout}s)...")
+        resp = requests.get(f"{SERVER}/health", timeout=timeout)
         if resp.status_code != 200:
             print_error("Server health check failed. Is the server running?")
             return {}
-    except requests.exceptions.RequestException:
-        print_error("Cannot connect to server. Make sure it's running on http://localhost:5000")
-        print_info("Start server with: python app.py")
+        print_success("Server is reachable and responding")
+    except requests.exceptions.RequestException as e:
+        print_error(f"Cannot connect to server: {e}")
+        if is_remote:
+            print_warning("Render free tier may be sleeping (cold start takes 30-60s)")
+            print_info("Try again in 1-2 minutes, or upgrade to paid tier for always-on service")
+        else:
+            print_info("Start server with: python app.py")
         return {}
     
-    print_warning("NOTE: If tests timeout, Flask debug mode auto-reloader may be interfering.")
-    print_warning("Solution: Stop editing files during tests, or run server with: FLASK_DEBUG=False python app.py")
+    if is_remote:
+        print_info("Testing against REMOTE/PRODUCTION server")
+        print_info("Using production database (from DATABASE_URL environment variable)")
+        print_warning("⚠️  Render free tier may have cold starts (30-60s delay on first request)")
+        print_warning("⚠️  If tests timeout, wait 1-2 minutes and try again")
+    else:
+        print_warning("NOTE: If tests timeout, Flask debug mode auto-reloader may be interfering.")
+        print_warning("Solution: Stop editing files during tests, or run server with: FLASK_DEBUG=False python app.py")
     
     results = {}
     
@@ -359,25 +415,21 @@ def test_all(username=USERNAME):
         return results
     time.sleep(0.5)
     
-    # 4. SSE Stats
-    results['sse_stats'] = test_sse_stats()
-    time.sleep(0.5)
-    
-    # 5. Send code via POST
+    # 4. Send code via POST
     test_code_post = f"TEST-POST-{int(time.time())}"
     results['send_post'] = send_code_post(username, test_code_post)
     time.sleep(1)
     
-    # 6. Send code via GET
+    # 5. Send code via GET
     test_code_get = f"TEST-GET-{int(time.time())}"
     results['send_get'] = send_code_get(username, test_code_get)
     time.sleep(1)
     
-    # 7. Test WebSocket
+    # 6. Test WebSocket
     results['websocket'] = test_websocket(username)
     time.sleep(1)
     
-    # 8. Test SSE embed stream
+    # 7. Test SSE embed stream
     results['sse_embed'] = test_sse_embed_stream(username)
     time.sleep(0.5)
     
@@ -409,7 +461,6 @@ def main():
         print("  python test_sse_helper.py send <username> [code] - Send a test code (POST)")
         print("  python test_sse_helper.py send-get <username> [code] - Send a test code (GET)")
         print("  python test_sse_helper.py health                - Test health endpoint")
-        print("  python test_sse_helper.py stats                 - Test SSE stats")
         print("  python test_sse_helper.py websocket <username> - Test WebSocket connection")
         print("  python test_sse_helper.py sse <username>       - Test SSE embed stream")
         print("  python test_sse_helper.py test-all [username]  - Run all tests")
@@ -443,9 +494,6 @@ def main():
     
     elif command == "health":
         test_health()
-    
-    elif command == "stats":
-        test_sse_stats()
     
     elif command == "websocket":
         username = sys.argv[2] if len(sys.argv) > 2 else USERNAME

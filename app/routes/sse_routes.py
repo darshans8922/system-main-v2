@@ -442,22 +442,3 @@ def sse_pong():
     
     return jsonify({'status': 'pong_received'}), 200
 
-
-@sse_bp.route('/sse-stats')
-def sse_stats():
-    """Get SSE connection statistics for monitoring."""
-    try:
-        stats = sse_manager.get_stats()
-        return jsonify(stats), 200
-    except Exception as e:
-        import logging
-        logging.error(f"Error getting SSE stats: {e}", exc_info=True)
-        # Return empty stats instead of error to prevent timeouts
-        return jsonify({
-            'active_connections': 0,
-            'users_with_connections': 0,
-            'total_queued_messages': 0,
-            'total_health_tracked': 0,
-            'error': str(e)
-        }), 200
-
