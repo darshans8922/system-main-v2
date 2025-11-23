@@ -84,4 +84,11 @@ def sse_test_page():
     return send_from_directory(str(tests_dir), 'sse_test.html')
 
 
+@main_bp.route('/load-test')
+def load_test_page():
+    """Serve the SSE load test HTML page."""
+    tests_dir = Path(__file__).parent.parent.parent / 'tests'
+    return send_from_directory(str(tests_dir), 'load_test_sse.html')
+
+
 
