@@ -217,6 +217,36 @@
             document.getElementById('statAvgCodes').textContent = avgCodes;
         }
 
+        // Global message listener (set up once)
+        let messageListenerSetup = false;
+        
+        function setupMessageListener() {
+            if (messageListenerSetup) return;
+            messageListenerSetup = true;
+            
+            window.addEventListener('message', function(event) {
+                // Verify origin for security
+                try {
+                    const apiBaseUrl = document.getElementById('apiBaseUrl').value;
+                    const url = new URL(apiBaseUrl);
+                    if (!event.origin.includes(url.hostname)) {
+                        return;
+                    }
+                } catch (e) {
+                    // If apiBaseUrl is invalid, skip origin check
+                }
+                
+                const messageData = event.data;
+                if (!messageData || !messageData.nonce) return;
+                
+                // Find connection by nonce
+                const connection = connections.find(c => c && c.messageNonce === messageData.nonce);
+                if (connection) {
+                    handleIframeMessage(connection, messageData);
+                }
+            });
+        }
+
         function createConnection(connectionId) {
             const apiBaseUrl = document.getElementById('apiBaseUrl').value;
             const username = document.getElementById('username').value;
@@ -225,6 +255,9 @@
                 log(`Connection ${connectionId}: No username provided`, 'error');
                 return null;
             }
+            
+            // Setup global message listener if not already done
+            setupMessageListener();
             
             const connection = {
                 id: connectionId,
@@ -248,25 +281,12 @@
             connection.iframe = iframe;
             document.body.appendChild(iframe);
             
-            // Listen for messages from iframe
-            window.addEventListener('message', function(event) {
-                // Verify origin for security
-                if (!event.origin.includes(new URL(apiBaseUrl).hostname)) {
-                    return;
-                }
-                
-                const data = event.data;
-                if (data && data.nonce === connection.messageNonce) {
-                    handleIframeMessage(connection, data);
-                }
-            });
-            
             log(`Connection ${connectionId}: Created iframe`, 'info');
             return connection;
         }
 
-        function handleIframeMessage(connection, data) {
-            switch(data.type) {
+        function handleIframeMessage(connection, messageData) {
+            switch(messageData.type) {
                 case 'iframe_ready':
                     log(`Connection ${connection.id}: Iframe ready`, 'success');
                     break;
@@ -277,17 +297,41 @@
                     updateStats();
                     break;
                 case 'iframe_sse_message':
+                    // Only count as code if it's not a ping/keepalive message
+                    const messageDataContent = messageData.data;
+                    if (messageDataContent && messageDataContent.type === 'ping') {
+                        // Skip ping messages - they're just keepalive
+                        break;
+                    }
+                    
                     connection.codesReceived++;
                     totalCodesReceived++;
-                    log(`Connection ${connection.id}: Received code - ${data.data?.code || 'N/A'}`, 'success');
+                    
+                    // Extract code from message - structure: { type: 'iframe_sse_message', data: { code: '...', ... }, ... }
+                    let codeValue = 'N/A';
+                    if (messageDataContent) {
+                        if (messageDataContent.code) {
+                            codeValue = messageDataContent.code;
+                        } else if (messageDataContent.type && messageDataContent.type !== 'connected') {
+                            // Might be a different message type
+                            codeValue = `Type: ${messageDataContent.type}`;
+                        }
+                    }
+                    
+                    // Debug: log full message structure for troubleshooting
+                    if (connection.codesReceived <= 2) {
+                        console.log(`Connection ${connection.id} - Message #${connection.codesReceived}:`, JSON.stringify(messageData, null, 2));
+                    }
+                    
+                    log(`Connection ${connection.id}: Received code - ${codeValue}`, 'success');
                     updateConnectionDisplay(connection);
                     updateStats();
                     break;
                 case 'iframe_sse_error':
                 case 'iframe_sse_failed':
-                    connection.errors.push(data.type);
+                    connection.errors.push(messageData.type);
                     totalErrors++;
-                    log(`Connection ${connection.id}: Error - ${data.type}`, 'error');
+                    log(`Connection ${connection.id}: Error - ${messageData.type}`, 'error');
                     updateConnectionDisplay(connection);
                     updateStats();
                     break;
