@@ -45,5 +45,7 @@ except Exception as e:
 if __name__ == "__main__":
     import os
     PORT = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=PORT, debug=True)
+    # Use environment variable for debug mode, default to False for production
+    DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    socketio.run(app, host="0.0.0.0", port=PORT, debug=DEBUG)
 
