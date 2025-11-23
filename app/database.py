@@ -68,27 +68,27 @@ is_eventlet = (
 # NullPool creates a new connection for each request (no pooling)
 # This is safe for eventlet since each green thread gets its own connection
 if is_eventlet and DATABASE_URL.startswith("postgresql"):
-    poolclass = NullPool
-    pool_pre_ping = True
-    pool_recycle = None  # Not used with NullPool
-    pool_timeout = None  # Not used with NullPool
+    # NullPool doesn't support pool_timeout or pool_recycle
+    engine = create_engine(
+        DATABASE_URL,
+        poolclass=NullPool,
+        pool_pre_ping=True,
+        future=True,
+        echo=False,
+        connect_args=connect_args_with_timeout,
+    )
 else:
     # Use QueuePool for non-eventlet environments (local development, threading mode)
-    poolclass = QueuePool
-    pool_pre_ping = True
-    pool_recycle = 3600  # Recycle connections after 1 hour
-    pool_timeout = 10    # Timeout when getting connection from pool
-
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=poolclass,
-    pool_pre_ping=pool_pre_ping,
-    pool_recycle=pool_recycle,
-    pool_timeout=pool_timeout,
-    future=True,
-    echo=False,
-    connect_args=connect_args_with_timeout,
-)
+    engine = create_engine(
+        DATABASE_URL,
+        poolclass=QueuePool,
+        pool_pre_ping=True,
+        pool_recycle=3600,  # Recycle connections after 1 hour
+        pool_timeout=10,    # Timeout when getting connection from pool
+        future=True,
+        echo=False,
+        connect_args=connect_args_with_timeout,
+    )
 
 SessionLocal = sessionmaker(
     bind=engine,
