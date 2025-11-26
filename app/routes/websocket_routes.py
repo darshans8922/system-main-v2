@@ -86,8 +86,8 @@ def _handle_code_event(data):
         code_data['metadata'] = {}
     code_data['metadata']['ingested_via'] = client.get('namespace', 'unknown')
 
+    # Broadcast code (with deduplication check) - silent operation, no ack
     websocket_manager.broadcast_code(code_data, socketio)
-    emit('ack', {'status': 'received'})
 
 
 @socketio.on('connect', namespace='/internal/newcodes')

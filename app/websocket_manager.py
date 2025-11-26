@@ -1,6 +1,9 @@
 """
 WebSocket connection and code broadcasting manager.
 """
+import hashlib
+import threading
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -8,10 +11,16 @@ from typing import Optional
 class WebSocketManager:
     """Manages WebSocket connections and code broadcasting."""
     
-    def __init__(self):
+    def __init__(self, deduplication_window_seconds: int = 5):
         self.clients = {}  # {sid: {'namespace': str, 'username': str, 'connected_at': datetime}}
         self.code_history = []  # Store recent codes
         self.max_history = 100
+        
+        # Deduplication: track recently broadcast codes to prevent duplicates
+        # Format: {code_hash: timestamp}
+        self._recent_codes: dict[str, float] = {}
+        self._deduplication_window = deduplication_window_seconds
+        self._deduplication_lock = threading.Lock()
     
     def add_client(self, sid, namespace='default', user=None):
         """Add a client to the manager."""
@@ -31,14 +40,87 @@ class WebSocketManager:
         """Return client metadata if connected."""
         return self.clients.get(sid)
     
+    def _generate_code_hash(self, code_value: str) -> str:
+        """Generate a hash for the code value for deduplication."""
+        return hashlib.sha256(code_value.encode('utf-8')).hexdigest()
+    
+    def _cleanup_old_codes(self, current_time: float):
+        """
+        Remove codes older than deduplication window.
+        Efficiently removes expired entries to prevent memory growth.
+        
+        Args:
+            current_time: Current timestamp to use for comparison
+        """
+        cutoff_time = current_time - self._deduplication_window
+        
+        with self._deduplication_lock:
+            # Efficiently remove expired entries
+            expired_keys = [
+                code_hash for code_hash, timestamp in self._recent_codes.items()
+                if timestamp < cutoff_time
+            ]
+            for key in expired_keys:
+                del self._recent_codes[key]
+    
+    def is_code_duplicate(self, code_value: str) -> bool:
+        """
+        Check if a code was recently broadcast (within deduplication window).
+        Automatically cleans up expired entries on every check to prevent memory growth.
+        
+        Args:
+            code_value: The code string to check
+            
+        Returns:
+            True if code is a duplicate (within window), False otherwise
+        """
+        if not code_value:
+            return False
+        
+        code_hash = self._generate_code_hash(code_value)
+        current_time = time.time()
+        
+        # Clean up expired entries on every check (prevents memory growth)
+        self._cleanup_old_codes(current_time)
+        
+        with self._deduplication_lock:
+            if code_hash in self._recent_codes:
+                last_broadcast_time = self._recent_codes[code_hash]
+                time_since_broadcast = current_time - last_broadcast_time
+                
+                if time_since_broadcast < self._deduplication_window:
+                    return True
+            
+            # Mark code as broadcast (update timestamp)
+            self._recent_codes[code_hash] = current_time
+            return False
+    
     def broadcast_code(self, code_data, socketio_instance=None):
         """
         Broadcast code to all connected clients (both Socket.IO and SSE).
+        Includes deduplication check to prevent duplicate broadcasts within the window.
         
         Args:
             code_data: Dictionary containing code information
             socketio_instance: SocketIO instance to use for broadcasting
+            
+        Returns:
+            bool: True if code was broadcast, False if it was a duplicate
         """
+        # Extract code value for deduplication
+        code_value = code_data.get('code', '')
+        if not code_value:
+            return False
+        
+        # Check for duplicates (within deduplication window)
+        if self.is_code_duplicate(code_value):
+            import logging
+            logging.info(
+                f"Duplicate code detected and skipped: '{code_value}' "
+                f"(within {self._deduplication_window}s window)"
+            )
+            return False
+        
         # Add timestamp if not present
         if 'timestamp' not in code_data:
             code_data['timestamp'] = datetime.now().isoformat()
@@ -59,6 +141,8 @@ class WebSocketManager:
         # Broadcast to SSE clients
         from app.sse_manager import sse_manager
         sse_manager.broadcast_code(code_data)
+        
+        return True
     
     def get_client_count(self):
         """Get the number of connected clients."""
