@@ -1,10 +1,13 @@
 """
 WebSocket route handlers with username verification.
 """
+import hmac
+
 from flask import Blueprint, request
 from flask_socketio import disconnect, emit, join_room, leave_room
 
 from app import socketio
+from app.config import Config
 from app.services import user_service
 from app.utils.validators import extract_username, validate_code_data
 from app.websocket_manager import websocket_manager
@@ -42,9 +45,34 @@ def _client_context():
     return client
 
 
+def _validate_ingest_token(payload: dict) -> bool:
+    server_token = Config.INGEST_SHARED_TOKEN
+    if not server_token:
+        emit('error', {'message': 'Ingest token not configured on server'})
+        return False
+    
+    provided_token = None
+    if isinstance(payload, dict):
+        provided_token = payload.get('token')
+    
+    if not provided_token:
+        emit('error', {'message': 'Ingest token is required'})
+        return False
+    
+    if not hmac.compare_digest(str(provided_token), str(server_token)):
+        emit('error', {'message': 'Invalid ingest token'})
+        return False
+    
+    return True
+
+
 def _handle_code_event(data):
     client = _client_context()
     if not client:
+        return
+    
+    if not isinstance(data, dict):
+        emit('error', {'message': 'Invalid payload'})
         return
 
     code_data = validate_code_data(data)
@@ -99,6 +127,13 @@ def handle_ws_ingest_disconnect():
 @socketio.on('code', namespace='/ws/ingest')
 def handle_ws_ingest_code(data):
     """Handle code received via /ws/ingest."""
+    if not isinstance(data, dict):
+        emit('error', {'message': 'Invalid payload'})
+        return
+    
+    if not _validate_ingest_token(data):
+        return
+    
     _handle_code_event(data)
 
 

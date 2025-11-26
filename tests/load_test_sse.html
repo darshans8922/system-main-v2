@@ -136,7 +136,7 @@
         <div class="controls">
             <div class="control-group">
                 <label>API Base URL:</label>
-                <input type="text" id="apiBaseUrl" value="https://system-main-v2.onrender.com" placeholder="https://system-main-v2.onrender.com">
+                <input type="text" id="apiBaseUrl" value="https://system-main-v2.onrender.com" placeholder="https://your-service.onrender.com">
             </div>
             <div class="control-group">
                 <label>Username:</label>
@@ -366,7 +366,7 @@
             `;
         }
 
-        async function sendTestCode() {
+        async function sendTestCode(retryCount = 0) {
             const apiBaseUrl = document.getElementById('apiBaseUrl').value;
             const username = document.getElementById('username').value;
             
@@ -376,22 +376,53 @@
             try {
                 const response = await fetch(`${apiBaseUrl}/api/ingest`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'LoadTest/1.0'
+                    },
                     body: JSON.stringify({
                         username: username,
                         code: code,
                         source: 'load-test-browser',
                         type: 'default'
-                    })
+                    }),
+                    signal: AbortSignal.timeout(30000) // 30 second timeout
                 });
                 
                 if (response.ok) {
                     log(`📤 Sent code: ${code}`, 'success');
                 } else {
-                    log(`❌ Failed to send code: ${response.status}`, 'error');
+                    // Retry on 502 (Render cold start) or 503 (overloaded)
+                    if ((response.status === 502 || response.status === 503) && retryCount < 3) {
+                        log(`⚠️  Server error ${response.status}, retrying... (attempt ${retryCount + 1}/3)`, 'warning');
+                        await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
+                        return sendTestCode(retryCount + 1);
+                    }
+                    log(`❌ Failed to send code: ${response.status} ${response.statusText}`, 'error');
                 }
             } catch (error) {
+                // Retry on network errors
+                if (retryCount < 3 && (error.name === 'TimeoutError' || error.message.includes('fetch'))) {
+                    log(`⚠️  Network error, retrying... (attempt ${retryCount + 1}/3)`, 'warning');
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
+                    return sendTestCode(retryCount + 1);
+                }
                 log(`❌ Error sending code: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkServerHealth() {
+            const apiBaseUrl = document.getElementById('apiBaseUrl').value;
+            try {
+                const response = await fetch(`${apiBaseUrl}/health`, { 
+                    method: 'GET',
+                    signal: AbortSignal.timeout(10000)
+                });
+                return response.ok;
+            } catch (error) {
+                log(`⚠️  Health check failed: ${error.message}`, 'warning');
+                log(`   Continuing anyway - Render may be cold starting...`, 'warning');
+                return false;
             }
         }
 
@@ -414,16 +445,30 @@
             
             log(`Starting load test with ${numConnections} connections...`, 'info');
             
-            // Create connections with slight delay between each
+            // Warm up server (important for Render cold starts)
+            log('Checking server health...', 'info');
+            const serverReady = await checkServerHealth();
+            if (serverReady) {
+                log('✅ Server is ready', 'success');
+            } else {
+                log('⚠️  Server may be cold starting, waiting 3 seconds...', 'warning');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+            
+            // Create connections with staggered start (important for Render)
+            log('Creating connections (staggered to avoid overwhelming server)...', 'info');
+            const batchSize = Math.min(10, Math.max(5, Math.floor(numConnections / 5)));
+            
             for (let i = 1; i <= numConnections; i++) {
                 const conn = createConnection(i);
                 if (conn) {
                     connections.push(conn);
                     updateConnectionDisplay(conn);
                 }
-                // Stagger connections slightly to avoid overwhelming server
+                // Stagger connections - longer delay for Render
                 if (i < numConnections) {
-                    await new Promise(resolve => setTimeout(resolve, 50));
+                    const delay = (i % batchSize === 0) ? 200 : 100; // Longer pause between batches
+                    await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
             

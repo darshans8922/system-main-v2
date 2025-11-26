@@ -2,6 +2,7 @@
 Load testing script for SSE connections.
 Tests multiple concurrent connections to verify system can handle scale.
 """
+import warnings
 import socketio
 import requests
 import time
@@ -11,11 +12,17 @@ import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
 
+# Suppress websocket-client warnings (will use polling if not installed)
+warnings.filterwarnings('ignore', message='.*websocket-client.*')
+
+# Render deployment URL - update this to your Render service URL
 SERVER = "https://system-main-v2.onrender.com"
 USERNAME = "bharat"
 NUM_CONNECTIONS = 50  # Number of concurrent connections to test
 CODES_TO_SEND = 10    # Number of codes to send during test
 TEST_DURATION = 60    # Test duration in seconds
+CONNECTION_TIMEOUT = 45  # Increased timeout for Render cold starts
+RETRY_ATTEMPTS = 3     # Number of retry attempts for failed connections
 
 class SSELoadTester:
     def __init__(self, server, username, connection_id):
@@ -29,19 +36,27 @@ class SSELoadTester:
         self.start_time = None
         self.end_time = None
         
-    def connect(self):
-        """Connect to WebSocket."""
+    def connect(self, retry_count=0):
+        """Connect to WebSocket with retry logic for Render cold starts."""
         try:
             self.start_time = time.time()
             self.sio.connect(
                 f"{self.server}/events?username={self.username}",
-                wait_timeout=30,
-                transports=['websocket', 'polling']
+                wait_timeout=CONNECTION_TIMEOUT,
+                transports=['websocket', 'polling'],
+                socketio_path='/socket.io/'
             )
             self.connected = True
             return True
         except Exception as e:
-            self.errors.append(f"Connection failed: {e}")
+            error_msg = str(e)
+            self.errors.append(f"Connection failed (attempt {retry_count + 1}): {error_msg}")
+            
+            # Retry on connection errors (Render cold start can cause 502/timeout)
+            if retry_count < RETRY_ATTEMPTS and ('502' in error_msg or 'timeout' in error_msg.lower() or 'connection' in error_msg.lower()):
+                time.sleep(2 * (retry_count + 1))  # Exponential backoff
+                return self.connect(retry_count + 1)
+            
             return False
     
     def setup_handlers(self):
@@ -84,8 +99,8 @@ class SSELoadTester:
         }
 
 
-def send_test_code(server, username, code_num):
-    """Send a test code via HTTP API."""
+def send_test_code(server, username, code_num, retry_count=0):
+    """Send a test code via HTTP API with retry logic for Render cold starts."""
     try:
         code = f"LOAD-TEST-{code_num}-{int(time.time())}"
         response = requests.post(
@@ -96,32 +111,66 @@ def send_test_code(server, username, code_num):
                 'source': 'load-test',
                 'type': 'default'
             },
-            timeout=30
+            timeout=30,
+            headers={'User-Agent': 'LoadTest/1.0'}
         )
         return {
             'success': response.status_code == 200,
             'code': code,
             'status': response.status_code
         }
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
+        error_msg = str(e)
+        # Retry on 502/timeout errors (Render cold start)
+        if retry_count < RETRY_ATTEMPTS and ('502' in error_msg or 'timeout' in error_msg.lower() or 'connection' in error_msg.lower()):
+            time.sleep(2 * (retry_count + 1))  # Exponential backoff
+            return send_test_code(server, username, code_num, retry_count + 1)
+        
         return {
             'success': False,
-            'code': None,
-            'error': str(e)
+            'code': code if 'code' in locals() else None,
+            'error': error_msg
         }
+
+
+def check_server_health(server):
+    """Check if Render server is ready (warm up cold start)."""
+    print("Checking server health...")
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(f"{server}/health", timeout=10)
+            if response.status_code == 200:
+                print("✅ Server is ready")
+                return True
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 3
+                print(f"⚠️  Server not ready (attempt {attempt + 1}/{max_retries}), waiting {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"❌ Server health check failed: {e}")
+                print("⚠️  Continuing anyway - Render may be cold starting...")
+                return False
+    return False
 
 
 def run_load_test(num_connections=50, codes_to_send=10, duration=60):
     """Run load test with multiple concurrent connections."""
     print("=" * 70)
-    print("SSE LOAD TEST")
+    print("SSE LOAD TEST - RENDER DEPLOYMENT")
     print("=" * 70)
     print(f"Server: {SERVER}")
     print(f"Username: {USERNAME}")
     print(f"Connections: {num_connections}")
     print(f"Test Duration: {duration} seconds")
     print(f"Codes to Send: {codes_to_send}")
+    print(f"Connection Timeout: {CONNECTION_TIMEOUT}s (for Render cold starts)")
     print("=" * 70)
+    print()
+    
+    # Warm up server (important for Render free tier cold starts)
+    check_server_health(SERVER)
     print()
     
     # Create testers
@@ -131,23 +180,51 @@ def run_load_test(num_connections=50, codes_to_send=10, duration=60):
         tester.setup_handlers()
         testers.append(tester)
     
-    # Phase 1: Connect all clients
+    # Phase 1: Connect all clients (with staggered start for Render)
     print("Phase 1: Connecting clients...")
+    print("  Note: Staggering connections to avoid overwhelming Render...")
     connected_count = 0
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        futures = {executor.submit(tester.connect): tester for tester in testers}
+    failed_count = 0
+    
+    # Use smaller batch size for Render to avoid overwhelming the server
+    batch_size = min(10, num_connections // 5) if num_connections > 20 else 5
+    
+    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+        futures = {}
+        for i, tester in enumerate(testers):
+            # Stagger connection attempts
+            if i > 0 and i % batch_size == 0:
+                time.sleep(1)  # Brief pause between batches
+            future = executor.submit(tester.connect)
+            futures[future] = tester
+        
         for future in as_completed(futures):
             tester = futures[future]
             try:
                 if future.result():
                     connected_count += 1
                     if connected_count % 10 == 0:
-                        print(f"  Connected: {connected_count}/{num_connections}")
+                        print(f"  ✅ Connected: {connected_count}/{num_connections}")
+                else:
+                    failed_count += 1
             except Exception as e:
-                print(f"  Connection error for tester {tester.connection_id}: {e}")
+                failed_count += 1
+                if failed_count <= 5:  # Only show first 5 errors
+                    print(f"  ❌ Connection error for tester {tester.connection_id}: {e}")
     
     print(f"\n✅ Connected: {connected_count}/{num_connections} clients")
-    time.sleep(2)  # Wait for all connections to stabilize
+    if failed_count > 0:
+        print(f"⚠️  Failed: {failed_count} connections")
+    
+    if connected_count == 0:
+        print("\n❌ No connections established. Check:")
+        print("  1. Server URL is correct")
+        print("  2. Username exists in database")
+        print("  3. Render service is running (may need to wait for cold start)")
+        return None
+    
+    print("  Waiting 3 seconds for connections to stabilize...")
+    time.sleep(3)  # Wait for all connections to stabilize
     
     # Phase 2: Send codes and monitor
     print(f"\nPhase 2: Sending {codes_to_send} codes and monitoring...")
@@ -238,6 +315,14 @@ def run_load_test(num_connections=50, codes_to_send=10, duration=60):
 if __name__ == "__main__":
     import sys
     
+    # Check if websocket-client is available
+    try:
+        import websocket
+        transport_note = "WebSocket transport available"
+    except ImportError:
+        transport_note = "⚠️  websocket-client not installed - using polling transport only"
+        transport_note += "\n   Install with: pip install websocket-client"
+    
     # Parse command line arguments
     num_conn = NUM_CONNECTIONS
     codes = CODES_TO_SEND
@@ -251,6 +336,7 @@ if __name__ == "__main__":
         duration = int(sys.argv[3])
     
     print(f"\nStarting load test with {num_conn} connections...")
+    print(f"Transport: {transport_note}")
     print("Press Ctrl+C to stop early\n")
     
     try:
@@ -258,12 +344,27 @@ if __name__ == "__main__":
         
         # Summary
         success_rate = stats['connected'] / stats['total_connections'] * 100
-        if success_rate >= 95:
-            print("\n✅ PASS: Load test successful (>95% connection rate)")
+        code_delivery_rate = (stats['total_codes_received'] / max(stats['codes_sent'] * stats['connected'], 1)) * 100
+        
+        print("\n" + "=" * 70)
+        print("FINAL SUMMARY")
+        print("=" * 70)
+        print(f"Connection Success Rate: {success_rate:.1f}%")
+        print(f"Code Delivery Rate: {code_delivery_rate:.1f}%")
+        
+        if success_rate >= 95 and code_delivery_rate >= 90:
+            print("\n✅ PASS: Load test successful")
+            print("   - Connection rate: >95%")
+            print("   - Code delivery rate: >90%")
         elif success_rate >= 80:
-            print("\n⚠️  WARNING: Some connection issues (<95% connection rate)")
+            print("\n⚠️  WARNING: Some issues detected")
+            print("   - Connection rate: 80-95% (acceptable)")
+            if code_delivery_rate < 90:
+                print(f"   - Code delivery rate: {code_delivery_rate:.1f}% (may indicate server overload)")
         else:
-            print("\n❌ FAIL: Significant connection issues (<80% connection rate)")
+            print("\n❌ FAIL: Significant issues")
+            print("   - Connection rate: <80%")
+            print("   - Possible causes: Render cold start, server overload, or network issues")
             
     except KeyboardInterrupt:
         print("\n\n⚠️  Test interrupted by user")

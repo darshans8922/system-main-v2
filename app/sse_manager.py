@@ -48,6 +48,7 @@ class SSEManager:
                 'username': username,
                 'last_ping': 0,
                 'last_pong': time.time(),
+                'last_rate_limited_pong': 0,
                 'ping_count': 0
             }
     
@@ -119,11 +120,36 @@ class SSEManager:
         with self.lock:
             return self.message_queues.get(connection_id)
     
-    def update_pong(self, connection_id: str) -> None:
-        """Update last pong time for a connection."""
+    def update_pong(self, connection_id: str, rate_limit_seconds: float = 10.0):
+        """
+        Update last pong time while enforcing a minimum interval between pongs.
+        
+        Returns:
+            (allowed: bool, retry_after: float)
+        """
         with self.lock:
-            if connection_id in self.connection_health:
-                self.connection_health[connection_id]['last_pong'] = time.time()
+            health = self.connection_health.get(connection_id)
+            if not health:
+                return False, rate_limit_seconds
+            
+            now = time.time()
+            last_rate_limited = health.get('last_rate_limited_pong', 0)
+            
+            if last_rate_limited and (now - last_rate_limited) < rate_limit_seconds:
+                retry_after = rate_limit_seconds - (now - last_rate_limited)
+                return False, max(retry_after, 0.0)
+            
+            health['last_rate_limited_pong'] = now
+            health['last_pong'] = now
+            return True, 0.0
+
+    def get_connection_username(self, connection_id: str) -> Optional[str]:
+        """Return the username that owns the given connection id."""
+        with self.lock:
+            health = self.connection_health.get(connection_id)
+            if health:
+                return health.get('username')
+            return None
     
     def get_connection_count(self) -> int:
         """Get total number of active SSE connections."""

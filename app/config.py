@@ -17,6 +17,7 @@ class Config:
     # Code ingestion settings
     MAX_CODE_LENGTH = 1000
     CODE_QUEUE_SIZE = 1000
+    INGEST_SHARED_TOKEN = os.environ.get('INGEST_SHARED_TOKEN')
     
     # SSE configuration
     WS_SECRET = os.environ.get('WS_SECRET') or os.environ.get('SECRET_KEY') or 'dev-ws-secret-change-in-production'

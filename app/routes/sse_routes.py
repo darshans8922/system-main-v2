@@ -430,18 +430,34 @@ def sse_pong():
     if not connection_id or not token:
         return jsonify({'error': 'connection_id and token required'}), 400
     
-    # Extract user from connection_id (format: user_timestamp)
+    # Extract user from connection_id (format: user_timestamp_random)
     try:
-        user = connection_id.split('_')[0]
-    except:
+        user_from_connection = connection_id.split('_')[0]
+    except Exception:
         return jsonify({'error': 'Invalid connection_id'}), 400
     
-    # Validate token
-    if not validate_iframe_token(token, user):
-        return jsonify({'error': 'Invalid token'}), 401
+    # Validate token matches the connection's user
+    if not validate_iframe_token(token, user_from_connection):
+        return jsonify({'error': 'Invalid or expired token'}), 401
     
-    # Update pong time
-    sse_manager.update_pong(connection_id)
+    # Ensure the connection exists and belongs to this user
+    connection_owner = sse_manager.get_connection_username(connection_id)
+    if not connection_owner:
+        return jsonify({'error': 'Unknown connection_id'}), 404
+    
+    if connection_owner != user_from_connection:
+        return jsonify({'error': 'Token/user mismatch'}), 403
+    
+    # Enforce per-connection rate limiting (1 pong / 10 seconds)
+    allowed, retry_after = sse_manager.update_pong(connection_id, rate_limit_seconds=10.0)
+    if not allowed:
+        response = jsonify({
+            'error': 'Rate limit exceeded',
+            'detail': 'Only one pong is allowed every 10 seconds'
+        })
+        response.status_code = 429
+        response.headers['Retry-After'] = f"{int(retry_after) if retry_after else 10}"
+        return response
     
     return jsonify({'status': 'pong_received'}), 200
 
