@@ -53,14 +53,14 @@ class UserService:
             try:
                 self.refresh_all_users()
             except Exception as e:
-                print(f"UserService: Initial refresh failed (will retry): {e}")
+                import logging
+                logging.warning(f"UserService: Initial refresh failed (will retry): {e}")
 
             self._stop_event.clear()
             self._background_thread = threading.Thread(
                 target=self._refresh_loop, name="user-cache-refresh", daemon=True
             )
             self._background_thread.start()
-            print(f"UserService: background cache refresh thread started (interval={self._refresh_interval}s)")
 
     def stop(self) -> None:
         """
@@ -130,16 +130,12 @@ class UserService:
                 self._cache.update(new_cache)
                 self._last_full_refresh = now
 
-            # Only log if we actually refreshed something (reduce log spam)
-            if len(new_cache) > 0:
-                print(
-                    f"UserService: refreshed {len(new_cache)} usernames from database "
-                    f"(ttl={self._ttl}s, next refresh in {self._refresh_interval}s)"
-                )
+            # Cache updated silently
         except Exception as exc:
             # Don't spam logs on every failure - only log if it's been a while
             if time.time() - getattr(self, '_last_error_log', 0) > 300:  # Log max once per 5 minutes
-                print(f"UserService: bulk refresh failed -> {exc}")
+                import logging
+                logging.warning(f"UserService: bulk refresh failed -> {exc}")
                 self._last_error_log = time.time()
 
     def refresh_username(self, username: str) -> Optional[dict]:

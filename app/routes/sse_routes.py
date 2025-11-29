@@ -131,8 +131,6 @@ def embed_stream():
     
     # Check if origin is allowed
     if not is_origin_allowed(parent_origin):
-        # Log for debugging
-        print(f"Origin validation failed: {parent_origin} not in {Config.ALLOWED_ORIGINS}")
         return jsonify({'error': 'Unauthorized origin - iframe access only'}), 403
     
     # HTML content with SSE connection

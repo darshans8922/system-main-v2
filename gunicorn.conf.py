@@ -32,19 +32,11 @@ proc_name = "code-server"
 # Worker lifecycle hooks
 def on_starting(server):
     """Called just before the master process is started."""
-    import logging
-    logging.info("=" * 60)
-    logging.info("Gunicorn master process starting")
-    logging.info(f"Workers: {workers}, Worker class: {worker_class}")
-    logging.info(f"Binding to: {bind}")
-    logging.info("=" * 60)
+    pass
 
 def when_ready(server):
     """Called just after the server is started."""
-    import logging
-    logging.info("=" * 60)
-    logging.info("Gunicorn server is ready to accept connections")
-    logging.info("=" * 60)
+    pass
 
 def worker_int(worker):
     """Called when a worker receives INT or QUIT signal."""
@@ -57,8 +49,7 @@ def pre_fork(server, worker):
 
 def post_fork(server, worker):
     """Called just after a worker has been forked."""
-    import logging
-    logging.info(f"Worker {worker.pid} forked and ready")
+    pass
 
 
 

@@ -68,14 +68,8 @@ def create_app(config_class=Config):
     
     try:
         with app.app_context():
-            logging.info("Initializing database...")
             init_db()
-            logging.info("Database initialized successfully")
-            
-            # Start user service (non-blocking, uses background thread internally)
-            logging.info("Starting user service...")
             user_service.start()
-            logging.info("User service started successfully")
     except Exception as e:
         logging.error(f"Error during database/service initialization: {e}", exc_info=True)
         # Don't crash the app - let it start and handle errors at request time
@@ -100,9 +94,7 @@ def _start_sse_cleanup_thread():
         while True:
             try:
                 time.sleep(60)  # Run every minute
-                cleaned = sse_manager.cleanup_stale_connections(timeout_seconds=120)
-                if cleaned > 0:
-                    logging.info(f"Cleaned up {cleaned} stale SSE connections")
+                sse_manager.cleanup_stale_connections(timeout_seconds=120)
             except Exception as e:
                 logging.error(f"Error in SSE cleanup loop: {e}")
     

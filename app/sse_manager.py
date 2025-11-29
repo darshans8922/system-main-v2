@@ -93,24 +93,13 @@ class SSEManager:
                 return
             
             # Broadcast to ALL connections (all users receive the code)
-            failed_queues = 0
             for connection_id in all_connection_ids:
                 if connection_id in self.message_queues:
                     try:
                         self.message_queues[connection_id].put_nowait(message)
                     except queue.Full:
-                        failed_queues += 1
-                        import logging
-                        logging.warning(
-                            f"SSE message queue full for connection '{connection_id}', "
-                            f"dropping message: {code_data.get('code', 'N/A')}"
-                        )
-            
-            if failed_queues > 0:
-                import logging
-                logging.warning(
-                    f"Failed to deliver code to {failed_queues}/{len(all_connection_ids)} connections"
-                )
+                        # Silently drop message if queue is full
+                        pass
     
     def get_message_queue(self, connection_id: str) -> Optional[queue.Queue]:
         """Get message queue for a specific connection."""

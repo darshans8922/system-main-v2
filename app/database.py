@@ -109,7 +109,6 @@ def init_db() -> None:
     try:
         from app import models  # noqa: F401  (side-effect import)
         Base.metadata.create_all(bind=engine)
-        logging.info("Database initialized successfully")
     except Exception as e:
         logging.error(f"Error initializing database: {e}", exc_info=True)
         raise
