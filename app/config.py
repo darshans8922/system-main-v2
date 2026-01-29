@@ -2,6 +2,9 @@
 Application configuration.
 """
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class Config:
@@ -60,6 +63,13 @@ class Config:
         "http://127.0.0.1:5000",
         "http://127.0.0.1:3000"
     ])
+    
+    # Redis configuration for caching
+    REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+    
+    # Redis connection pool settings
+    REDIS_SOCKET_CONNECT_TIMEOUT = int(os.environ.get('REDIS_SOCKET_CONNECT_TIMEOUT', '5'))
+    REDIS_SOCKET_TIMEOUT = int(os.environ.get('REDIS_SOCKET_TIMEOUT', '5'))
 
 
 

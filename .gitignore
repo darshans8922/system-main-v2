@@ -55,4 +55,5 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+test_api.py
 
