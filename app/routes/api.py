@@ -33,7 +33,7 @@ def get_exchange_rates():
         with db_session() as session:
             result = session.execute(
                 select(
-                    func.upper(ExchangeRate.target_currency).label('currency'),
+                    func.upper(func.trim(ExchangeRate.target_currency)).label('currency'),
                     ExchangeRate.rate_from_usd
                 )
             ).mappings().all()
@@ -74,13 +74,16 @@ def convert_to_usd():
         except (ValueError, TypeError):
             return jsonify({'error': 'amount must be a valid number'}), 400
         
+        if not isinstance(target_currency, str):
+            return jsonify({'error': 'target_currency must be a string'}), 400
+        
         currency = target_currency.strip().upper()
-        if len(currency) != 3:
-            return jsonify({'error': 'target_currency must be a 3-character ISO code (e.g., INR, EUR)'}), 400
+        if not currency or len(currency) < 3 or len(currency) > 10:
+            return jsonify({'error': 'target_currency must be 3-10 characters (e.g., BTC, USDT, INR)'}), 400
         
         with db_session() as session:
             user = session.execute(
-                select(User).where(User.username == username)
+                select(User).where(func.lower(User.username) == username.lower())
             ).scalar_one_or_none()
             
             if not user:
@@ -94,7 +97,7 @@ def convert_to_usd():
             
             if rate_from_usd is None:
                 exchange_rate = session.execute(
-                    select(ExchangeRate).where(func.upper(ExchangeRate.target_currency) == currency)
+                    select(ExchangeRate).where(func.upper(func.trim(ExchangeRate.target_currency)) == currency)
                 ).scalar_one_or_none()
                 
                 if not exchange_rate:
