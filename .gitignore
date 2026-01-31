@@ -57,4 +57,5 @@ Thumbs.db
 htmlcov/
 test_api.py
 test_redis_user_auth_flow.py
+*.pyc
 

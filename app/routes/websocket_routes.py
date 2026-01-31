@@ -8,7 +8,7 @@ from flask_socketio import disconnect, emit, join_room, leave_room
 
 from app import socketio
 from app.config import Config
-from app.services import get_user_auth_service
+from app.services import get_user_auth_service, user_service
 from app.utils.validators import extract_username, validate_code_data
 from app.websocket_manager import websocket_manager
 
@@ -24,10 +24,12 @@ def _resolve_user_from_request():
         return None
     
     auth_service = get_user_auth_service()
-    if not auth_service or not auth_service.is_available():
-        return None
+    if auth_service and auth_service.is_available():
+        user_record = auth_service.verify_username(normalized)
+        if user_record:
+            return user_record
     
-    return auth_service.verify_username(normalized)
+    return user_service.verify_username(normalized)
 
 
 def _authorize_connection(namespace):
