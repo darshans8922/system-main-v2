@@ -25,7 +25,7 @@ class Config:
     # SSE configuration
     WS_SECRET = os.environ.get('WS_SECRET') or os.environ.get('SECRET_KEY') or 'dev-ws-secret-change-in-production'
     
-    # Allowed origins for embed-stream (client will provide full list)
+    # Allowed origins for CORS and embed-stream
     ALLOWED_ORIGINS = [
         "https://kciade.online",
         "https://www.kciade.online",
@@ -45,8 +45,10 @@ class Config:
         "https://stake1001.com",
         "https://stake1002.com",
         "https://stake1003.com",
+        "https://stake1017.com",
         "https://stake1021.com",
         "https://stake1022.com",
+        "https://stake1039.com",
         "https://stake.us",
         "https://stake.br"
     ]

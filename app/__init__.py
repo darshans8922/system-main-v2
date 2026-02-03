@@ -4,6 +4,7 @@ Main Flask application factory.
 from pathlib import Path
 
 from flask import Flask
+from flask_cors import CORS
 from flask_socketio import SocketIO
 
 from app.config import Config
@@ -35,7 +36,7 @@ else:
     # Local development: use threading (works without eventlet)
     async_mode = 'threading'
 
-socketio = SocketIO(cors_allowed_origins="*", async_mode=async_mode)
+socketio = SocketIO(cors_allowed_origins=Config.ALLOWED_ORIGINS, async_mode=async_mode)
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = BASE_DIR.parent / "templates"
@@ -45,6 +46,8 @@ def create_app(config_class=Config):
     """Create and configure the Flask application."""
     app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
     app.config.from_object(config_class)
+    
+    CORS(app, origins=config_class.ALLOWED_ORIGINS, supports_credentials=True)
     
     # Initialize SocketIO
     socketio.init_app(app)
