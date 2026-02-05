@@ -10,7 +10,7 @@ from flask_socketio import SocketIO
 from app.config import Config
 from app.database import SessionLocal, init_db
 from app.models import ExchangeRate, User
-from app.services import get_cache_service, get_user_auth_service, init_cache_service, init_user_auth_service, user_service, user_sync_worker
+from app.services import user_service
 from sqlalchemy import func, select
 
 # Auto-detect async mode:
@@ -75,85 +75,93 @@ def create_app(config_class=Config):
         with app.app_context():
             init_db()
             user_service.start()
-            init_cache_service(config_class)
-            init_user_auth_service(config_class)
-            user_sync_worker.start()
-            _preload_pinned_users_to_redis()
-            _preload_exchange_rates_to_redis()
     except Exception as e:
         logging.error(f"Error during database/service initialization: {e}", exc_info=True)
     
     _start_sse_cleanup_thread()
+    _start_active_disconnect_worker(app)
     
     return app
 
 
-def _preload_pinned_users_to_redis():
-    """Preload pinned users into Redis for fast WebSocket connections."""
-    auth_service = get_user_auth_service()
-    if not auth_service or not auth_service.is_available():
-        return
-    
-    try:
-        with SessionLocal() as session:
-            for username in Config.PINNED_USERS:
-                row = session.execute(
-                    select(User).where(func.lower(User.username) == username.lower())
-                ).scalar_one_or_none()
-                
-                if row:
-                    auth_service.set_user(row.username, row.id)
-    except Exception:
-        pass
-
-
-def _preload_exchange_rates_to_redis():
-    """Preload all exchange rates into Redis cache on startup."""
+def _start_active_disconnect_worker(app):
+    """
+    Start background worker that disconnects users removed from database.
+    Runs every 10 seconds, checks all connected users, disconnects if not in DB.
+    """
+    import threading
+    import time
     import logging
+    
     logger = logging.getLogger(__name__)
     
-    cache_service = get_cache_service()
-    if not cache_service:
-        logger.warning("Cache service not initialized. Cannot preload exchange rates.")
-        return
-    
-    if not cache_service.is_available():
-        logger.warning("Cache service not available (Redis not connected). Cannot preload exchange rates.")
-        return
-    
-    try:
-        with SessionLocal() as session:
-            # Use scalars() to get ExchangeRate instances directly
-            rows = session.execute(select(ExchangeRate)).scalars().all()
-            logger.info(f"Found {len(rows)} exchange rate records in database")
-            
-            exchange_rates = []
-            for row in rows:
-                if not row.target_currency or not row.rate_from_usd or row.rate_from_usd <= 0:
+    def active_disconnect_loop():
+        """Background loop to disconnect users removed from database."""
+        from app.websocket_manager import websocket_manager
+        from app import socketio
+        
+        while True:
+            try:
+                time.sleep(10)  # Run every 10 seconds
+                
+                # Get all currently connected usernames (thread-safe snapshot)
+                connected_users = set()
+                sids_to_disconnect = []
+                
+                # Create snapshot of clients (dict access is thread-safe for reading in Python)
+                clients_snapshot = dict(websocket_manager.clients)
+                for sid, client_info in clients_snapshot.items():
+                    username = client_info.get('username')
+                    if username:
+                        connected_users.add(username.lower())
+                
+                if not connected_users:
                     continue
                 
-                currency = row.target_currency.strip().upper()
-                if currency:
-                    exchange_rates.append({
-                        'currency': currency,
-                        'rate': float(row.rate_from_usd)
-                    })
-            
-            logger.info(f"Preparing to preload {len(exchange_rates)} exchange rates to Redis")
-            
-            logger.info(f"Preparing to preload {len(exchange_rates)} exchange rates to Redis")
-            
-            if exchange_rates:
-                count = cache_service.preload_all_rates(exchange_rates)
-                if count > 0:
-                    logger.info(f"Successfully preloaded {count} exchange rates to Redis")
-                else:
-                    logger.warning("preload_all_rates returned 0 - no rates were cached")
-            else:
-                logger.warning("No valid exchange rates found to preload")
+                # Batch query: check which users still exist in DB
+                try:
+                    with app.app_context():
+                        from app.database import SessionLocal
+                        with SessionLocal() as session:
+                            valid_users = session.execute(
+                                select(func.lower(User.username)).where(
+                                    func.lower(User.username).in_(connected_users)
+                                )
+                            ).scalars().all()
+                            
+                            valid_users_set = {u.lower() for u in valid_users}
+                            
+                            # Find users to disconnect (in connected but not in DB)
+                            users_to_disconnect = connected_users - valid_users_set
+                            
+                            if users_to_disconnect:
+                                logger.info(f"Active disconnect: Found {len(users_to_disconnect)} users to disconnect")
+                                
+                                # Collect SIDs to disconnect (use snapshot)
+                                for sid, client_info in clients_snapshot.items():
+                                    username = client_info.get('username')
+                                    if username and username.lower() in users_to_disconnect:
+                                        sids_to_disconnect.append((sid, client_info.get('namespace', '/'), username))
+                                
+                                # Disconnect each user
+                                for sid, namespace, username in sids_to_disconnect:
+                                    try:
+                                        socketio.server.disconnect(sid, namespace=namespace)
+                                        websocket_manager.remove_client(sid)
+                                        logger.info(f"Disconnected user: {username} (removed from DB)")
+                                    except Exception as e:
+                                        logger.warning(f"Error disconnecting {username}: {e}")
                 
-    except Exception as e:
-        logger.error(f"Error preloading exchange rates to Redis: {e}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Error in active disconnect worker: {e}", exc_info=True)
+            
+            except Exception as e:
+                logger.error(f"Error in active disconnect loop: {e}", exc_info=True)
+                time.sleep(10)  # Wait before retrying
+    
+    worker_thread = threading.Thread(target=active_disconnect_loop, daemon=True, name="Active-Disconnect-Worker")
+    worker_thread.start()
+    logger.info("Active disconnect worker started")
 
 
 def _start_sse_cleanup_thread():

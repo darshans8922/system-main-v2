@@ -2,7 +2,6 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import select, func
 from app.database import db_session
 from app.models import User, ExchangeRate
-from app.services import get_cache_service
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -89,15 +88,19 @@ def convert_to_usd():
             if not user:
                 return jsonify({'error': f'User with username "{username}" not found'}), 404
             
-            cache_service = get_cache_service()
-            if not cache_service or not cache_service.is_available():
-                return jsonify({'error': 'Cache service unavailable'}), 500
+            # Fetch exchange rate directly from database
+            rate_row = session.execute(
+                select(ExchangeRate).where(
+                    func.upper(func.trim(ExchangeRate.target_currency)) == currency
+                )
+            ).scalar_one_or_none()
             
-            rate_from_usd = cache_service.get_exchange_rate(currency)
-            if rate_from_usd is None:
+            if not rate_row or not rate_row.rate_from_usd:
                 return jsonify({
                     'error': f'Exchange rate for currency "{currency}" not found'
                 }), 404
+            
+            rate_from_usd = float(rate_row.rate_from_usd)
             
             if rate_from_usd <= 0:
                 return jsonify({

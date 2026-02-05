@@ -8,7 +8,7 @@ from flask_socketio import disconnect, emit, join_room, leave_room
 
 from app import socketio
 from app.config import Config
-from app.services import get_user_auth_service, user_service
+from app.services import user_service
 from app.utils.validators import extract_username, validate_code_data
 from app.websocket_manager import websocket_manager
 
@@ -17,49 +17,15 @@ ws_bp = Blueprint('ws', __name__)
 
 def _resolve_user_from_request():
     """
-    Resolve user with clean priority flow:
-    1. Local cache (pinned users only) - if found, return immediately
-    2. Redis cache - if found, return immediately
-    3. Quick DB lookup (synchronous with timeout) - if found, cache in Redis and return
-    4. If not found, return None
+    Resolve user with priority flow:
+    1. Check in-memory cache (fastest)
+    2. If not found, perform DB lookup (caches result)
     """
     username = request.args.get('username') or request.headers.get('X-Username')
     if not username:
         return None
-    normalized = extract_username({'username': username})
-    if not normalized:
-        return None
     
-    # Normalize to lowercase for consistent lookups
-    normalized = normalized.lower()
-    
-    # Priority 1: Check local cache (pinned users only)
-    cached = user_service._get_from_cache(normalized)
-    if cached and cached.get('user_id'):
-        return cached
-    
-    # Priority 2: Check Redis
-    auth_service = get_user_auth_service()
-    if auth_service and auth_service.is_available():
-        try:
-            user_record = auth_service.verify_username(normalized)
-            if user_record:
-                return user_record
-        except Exception:
-            pass
-    
-    # Priority 3: Quick synchronous DB lookup (with timeout)
-    # Increased timeout to 1s for Render DB latency
-    if auth_service:
-        try:
-            user_record = auth_service.lookup_user_sync(normalized, timeout=1.0)
-            if user_record:
-                return user_record
-        except Exception:
-            pass
-    
-    # Not found in any cache or DB
-    return None
+    return user_service.get_user(username)
 
 
 def _authorize_connection(namespace):

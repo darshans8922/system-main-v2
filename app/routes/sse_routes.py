@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, Response, request, jsonify
 from app.config import Config
-from app.services import get_user_auth_service, user_service
+from app.services import user_service
 from app.sse_manager import sse_manager
 from app.utils.validators import extract_username
 
@@ -19,46 +19,15 @@ sse_bp = Blueprint('sse', __name__)
 
 def _resolve_user_for_sse(user: str) -> Optional[dict]:
     """
-    Resolve user with clean priority flow:
-    1) Local cache (pinned only)
-    2) Redis
-    3) Quick DB lookup (with timeout) which will backfill Redis
+    Resolve user with priority flow:
+    1. Check in-memory cache (fastest)
+    2. If not found, perform DB lookup (caches result)
     """
     normalized = extract_username({"username": user})
     if not normalized:
         return None
     
-    # Normalize to lowercase for consistent lookups
-    normalized = normalized.lower()
-
-    # Priority 1: local cache (pinned users only)
-    cached = user_service._get_from_cache(normalized)
-    if cached and cached.get("user_id"):
-        return cached
-
-    auth_service = get_user_auth_service()
-    if not auth_service:
-        return None
-
-    # Priority 2: Redis
-    if auth_service.is_available():
-        try:
-            user_record = auth_service.verify_username(normalized)
-            if user_record and user_record.get("user_id"):
-                return user_record
-        except Exception:
-            pass
-
-    # Priority 3: quick DB lookup (backfills Redis)
-    # Increased timeout to 1s for Render DB latency
-    try:
-        user_record = auth_service.lookup_user_sync(normalized, timeout=1.0)
-        if user_record and user_record.get("user_id"):
-            return user_record
-    except Exception:
-        pass
-
-    return None
+    return user_service.get_user(normalized)
 
 
 def generate_iframe_token(user: str, expiry_minutes: int = 15) -> str:
