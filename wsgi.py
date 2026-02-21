@@ -1,6 +1,13 @@
 """
 WSGI entry point for production.
+
+Eventlet monkey patching must run before any other imports so that the standard
+library (socket, ssl, select, etc.) is replaced with eventlet's green versions.
+This allows the worker to handle multiple connections concurrently.
 """
+import eventlet
+eventlet.monkey_patch()
+
 import sys
 import logging
 
