@@ -62,3 +62,4 @@ test_implementation.py
 test_rate_limit_embed_stream.py
 test_cloudflare_setup.py
 .gitignore
+.test_rate_limit_embed_stream.py
