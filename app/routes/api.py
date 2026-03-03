@@ -1,9 +1,34 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy import select, func
+
+from app.config import Config
 from app.database import db_session
 from app.models import User, ExchangeRate
+from app.rate_limit import get_username_key, limiter
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+def _get_connected_usernames():
+    """Return set of usernames currently connected via WebSocket or SSE (lowercase)."""
+    connected = set()
+    try:
+        from app.websocket_manager import websocket_manager
+        clients_snapshot = dict(websocket_manager.clients)
+        for sid, info in clients_snapshot.items():
+            u = info.get('username')
+            if u:
+                connected.add(u.lower())
+    except Exception:
+        pass
+    try:
+        from app.sse_manager import sse_manager
+        with sse_manager.lock:
+            for username in sse_manager.connections.keys():
+                if username:
+                    connected.add(username.lower())
+    except Exception:
+        pass
+    return connected
 
 
 @api_bp.route('/ingest', methods=['POST', 'GET'])
@@ -51,7 +76,18 @@ def get_exchange_rates():
         }), 500
 
 
+# Rate limits: per-IP (max usernames one IP can send in 1 min) and per-username (Flask-Limiter; Cloudflare cannot key by username)
+_IP_LIMIT = f"{Config.RATELIMIT_IP_USERNAME_PER_MINUTE} per minute"
+_USERNAME_LIMIT = f"{Config.RATELIMIT_PER_USERNAME_PER_MINUTE} per minute"
+
+
 @api_bp.route('/users/claims/convert-to-usd', methods=['POST'])
+@limiter.limit(_IP_LIMIT)
+@limiter.limit(
+    _USERNAME_LIMIT,
+    key_func=get_username_key,
+    exempt_when=lambda: get_username_key() is None,
+)
 def convert_to_usd():
     try:
         data = request.get_json()
@@ -87,7 +123,9 @@ def convert_to_usd():
             
             if not user:
                 return jsonify({'error': f'User with username "{username}" not found'}), 404
-            
+
+            # Only registered users (in backend DB) can convert to USD — no connection check
+
             # Fetch exchange rate directly from database
             rate_row = session.execute(
                 select(ExchangeRate).where(

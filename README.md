@@ -35,6 +35,14 @@ gunicorn --config gunicorn.conf.py wsgi:app
 python test_sse_helper.py test-all bharat
 ```
 
+## Rate limiting
+
+- **Convert-to-USD** (`POST /api/users/claims/convert-to-usd`): 15/min per IP, 10/min per username.
+- **Embed-stream** (`GET /embed-stream`): 25/min per username (query param `user`).
+- **Relay** (`GET /relay`): only allowed domains (see `RELAY_ALLOWED_DOMAINS` in config).
+
+Optional env: `RATELIMIT_IP_USERNAME_PER_MINUTE`, `RATELIMIT_PER_USERNAME_PER_MINUTE`, `RATELIMIT_EMBED_STREAM_PER_USERNAME_PER_MINUTE`. For production with multiple workers, set `RATELIMIT_STORAGE_URI` (e.g. `redis://...`) so limits are shared. Run `python test_rate_limit.py` to verify.
+
 ## Production Deployment
 
-Set `DATABASE_URL` environment variable in your deployment platform (e.g., Render).
+Set `DATABASE_URL` in your deployment platform (e.g., Render). For shared rate limits across workers, set `RATELIMIT_STORAGE_URI`.

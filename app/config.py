@@ -85,5 +85,50 @@ class Config:
     # Pinned users - always kept in cache for fast WebSocket connections
     PINNED_USERS = ["bharat", "marc_henry"]
 
+    # Rate limiting (Flask-Limiter) — applied on username-bearing API endpoints
+    # Per IP: max requests per minute (effectively max usernames one IP can send in 1 min)
+    RATELIMIT_IP_USERNAME_PER_MINUTE = int(os.environ.get('RATELIMIT_IP_USERNAME_PER_MINUTE', '15'))
+    # Per username: max requests per minute for the same username (convert-to-usd API)
+    RATELIMIT_PER_USERNAME_PER_MINUTE = int(os.environ.get('RATELIMIT_PER_USERNAME_PER_MINUTE', '10'))
+    # Per username on /embed-stream: max requests per minute per user param
+    RATELIMIT_EMBED_STREAM_PER_USERNAME_PER_MINUTE = int(
+        os.environ.get('RATELIMIT_EMBED_STREAM_PER_USERNAME_PER_MINUTE', '25')
+    )
+    # Rate limit storage: set RATELIMIT_STORAGE_URI for production (e.g. redis://...) when using multiple workers
+    RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI', '')
+
+    # Domains the /relay endpoint is allowed to fetch (hostnames only, no scheme)
+    RELAY_ALLOWED_DOMAINS = [
+        'kciade.online',
+        'www.kciade.online',
+        'stake.com',
+        'stake.ac',
+        'stake.games',
+        'stake.bet',
+        'stake.pet',
+        'stake.mba',
+        'stake.jp',
+        'stake.bz',
+        'stake.ceo',
+        'stake.krd',
+        'staketr.com',
+        'stake1001.com',
+        'stake1002.com',
+        'stake1003.com',
+        'stake1017.com',
+        'stake1021.com',
+        'stake1022.com',
+        'stake1039.com',
+        'stake.us',
+        'stake.br',
+        'code-uksx.onrender.com',
+        'localhost',
+        '127.0.0.1',
+    ]
+    # Allow adding relay domains via env (comma-separated)
+    _relay_extra = os.environ.get('RELAY_ALLOWED_DOMAINS', '')
+    if _relay_extra:
+        RELAY_ALLOWED_DOMAINS.extend(d.strip().lower() for d in _relay_extra.split(',') if d.strip())
+
 
 

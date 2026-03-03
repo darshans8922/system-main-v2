@@ -2,12 +2,26 @@
 Main API routes (no HTML rendering).
 """
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 
+from app.config import Config
 from app.utils.decoy import generate_decoy_response
 
 main_bp = Blueprint('main', __name__)
+
+
+def _relay_domain_allowed(url: str) -> bool:
+    """Return True if the URL's host is in RELAY_ALLOWED_DOMAINS."""
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+        host = parsed.netloc.split(":")[0].lower()
+        return host in Config.RELAY_ALLOWED_DOMAINS
+    except Exception:
+        return False
 
 
 @main_bp.route('/health')
@@ -21,12 +35,14 @@ def health():
 
 @main_bp.route('/relay')
 def relay():
-    """Bypass CSP restrictions."""
-    # Get the target URL from query parameters
+    """Fetch a URL and return its content (CSP bypass). Only allowed domains may be fetched."""
     target_url = request.args.get('url')
     if not target_url:
         return jsonify({'error': 'Missing url parameter'}), 400
-    
+
+    if not _relay_domain_allowed(target_url):
+        return jsonify({'error': 'Domain not allowed for relay'}), 403
+
     try:
         import requests
         response = requests.get(target_url, timeout=10)

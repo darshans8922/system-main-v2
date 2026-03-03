@@ -50,9 +50,13 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
     
     CORS(app, origins=config_class.ALLOWED_ORIGINS, supports_credentials=True)
-    
-    # Initialize SocketIO
+
+    # SocketIO must be bound to the app before run() is used (e.g. app.py / wsgi)
     socketio.init_app(app)
+
+    # Rate limiting (Flask-Limiter): per-IP and per-username; config from config_class (incl. RATELIMIT_STORAGE_URI)
+    from app.rate_limit import limiter
+    limiter.init_app(app)
     
     # Register blueprints
     from app.routes.main import main_bp

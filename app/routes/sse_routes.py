@@ -11,12 +11,17 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from flask import Blueprint, Response, request, jsonify
+
 from app.config import Config
+from app.rate_limit import get_embed_stream_user_key, limiter
 from app.services import user_service
 from app.sse_manager import sse_manager
 from app.utils.validators import extract_username
 
 sse_bp = Blueprint('sse', __name__)
+
+# Rate limit: 25 requests per minute per username on /embed-stream
+_EMBED_STREAM_LIMIT = f"{Config.RATELIMIT_EMBED_STREAM_PER_USERNAME_PER_MINUTE} per minute"
 
 
 class InvalidUsernameRateLimiter:
@@ -167,6 +172,11 @@ def is_origin_allowed(origin: str) -> bool:
 
 
 @sse_bp.route('/embed-stream')
+@limiter.limit(
+    _EMBED_STREAM_LIMIT,
+    key_func=get_embed_stream_user_key,
+    exempt_when=lambda: get_embed_stream_user_key() is None,
+)
 def embed_stream():
     """Hidden iframe endpoint for cross-origin SSE streaming."""
     user = request.args.get('user')
